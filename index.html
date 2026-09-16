@@ -729,6 +729,50 @@ let dataSourceStatus = 'loading';
 // ============================================================
 // LOADER: Fetch data dari Google Apps Script
 // ============================================================
+// Fuzzy matching untuk data yang baru diterima dari Apps Script
+function findOutletMetaFromData(outletName, metaData) {
+  if (!outletName || !metaData) return null;
+  if (metaData[outletName]) return metaData[outletName];
+  
+  const normTarget = String(outletName).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  
+  for (const key in metaData) {
+    const normKey = String(key).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (normKey === normTarget) return metaData[key];
+  }
+  
+  // Partial match
+  const nameUpper = outletName.toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim();
+  const nameWords = nameUpper.split(/\s+/).filter(w => w.length > 2);
+  
+  let bestMatch = null;
+  let bestScore = 0;
+  
+  for (const key in metaData) {
+    const keyUpper = key.toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim();
+    const keyWords = keyUpper.split(/\s+/).filter(w => w.length > 2);
+    
+    let matches = 0;
+    for (const nw of nameWords) {
+      for (const kw of keyWords) {
+        if (nw === kw || nw.includes(kw) || kw.includes(nw)) {
+          matches++;
+          break;
+        }
+      }
+    }
+    
+    const score = matches / Math.max(nameWords.length, keyWords.length);
+    if (score > bestScore && score >= 0.6) {
+      bestScore = score;
+      bestMatch = metaData[key];
+    }
+  }
+  
+  return bestMatch;
+}
+
+
 async function loadDataFromAppsScript() {
   if (!APPS_SCRIPT_CONFIG.enabled) {
     dataSourceStatus = 'fallback';
@@ -761,9 +805,31 @@ async function loadDataFromAppsScript() {
           productSales[outlet] = result.productSales[outlet];
         }
       });
+      
+      // Juga bangun mapping berdasarkan KODE jika tersedia
+      if (result.productSalesByCode) {
+        productSalesByCode = {};
+        Object.keys(result.productSalesByCode).forEach(code => {
+          if (Object.keys(result.productSalesByCode[code]).length > 0) {
+            productSalesByCode[code] = result.productSalesByCode[code];
+          }
+        });
+      }
+      
+      // Fallback: bangun productSalesByCode dari outletMeta + productSales
+      if (Object.keys(productSalesByCode).length === 0 && result.outletMeta) {
+        productSalesByCode = {};
+        for (const name in result.outletMeta) {
+          const meta = result.outletMeta[name];
+          if (meta && meta.code && productSales[name]) {
+            productSalesByCode[String(meta.code)] = productSales[name];
+          }
+        }
+      }
     }
     
     if (result.outletMeta) {
+      // Update outletMeta
       for (const name in result.outletMeta) {
         const meta = result.outletMeta[name];
         if (!outletMeta[name]) outletMeta[name] = {};
@@ -771,10 +837,43 @@ async function loadDataFromAppsScript() {
         if (meta.distributor) outletMeta[name].distributor = meta.distributor;
       }
       
+      // Build mapping: KODE -> data lengkap (UTAMA)
+      const codeToData = {};
+      for (const name in result.outletMeta) {
+        const meta = result.outletMeta[name];
+        if (meta && meta.code) {
+          codeToData[String(meta.code)] = { ...meta, namaAsli: name };
+        }
+      }
+      
+      // Build mapping: nama -> data (fallback)
+      const nameToData = result.outletMeta;
+      
+      // Update allOutlets: UTAMAKAN KODE
       allOutlets.forEach(o => {
-        const meta = result.outletMeta[o.outlet];
+        let meta = null;
+        let matchedBy = null;
+        
+        // UTAMA: Cocokkan berdasarkan KODE
+        if (o.kode && codeToData[o.kode]) {
+          meta = codeToData[o.kode];
+          matchedBy = 'code';
+          // Update NAMA mengikuti Excel (kode adalah raja!)
+          if (meta.namaAsli && meta.namaAsli !== o.outlet) {
+            o.outlet = meta.namaAsli;
+          }
+        }
+        
+        // Fallback: Berdasarkan nama
+        if (!meta) {
+          meta = findOutletMetaFromData(o.outlet, nameToData);
+          matchedBy = 'name';
+          if (meta && meta.code) {
+            o.kode = String(meta.code);
+          }
+        }
+        
         if (meta) {
-          if (meta.code) o.kode = String(meta.code);
           if (meta.distributor) o.distributor = meta.distributor;
         }
       });
@@ -1329,18 +1428,45 @@ const productSales = {
   'ZAEM FARMA, AP.':{'DABUCR35':143147,'DABURP4A':115500,'DADASS10':859467,'DADEL1T1':600733,'DADEL2T2':99100,'DAFORD10':68000,'DAFORD20':71583,'DAFORD50':164000,'DAFORS40':95333,'DAHBLCNF':60000,'DANAECLB':184000,'DANAECLF':115000,'DANAST16':168530,'DANAST32':153995,'DANAVD16':272857,'DANAVD32':336500,'DANAW16S':376974,'DANAW32S':317340,'DANAWHBM':197760,'DANIFS60':61808,'DANPGCX1':31468,'DANSLDV2':43080,'DANSLGN1':21474,'DANUAB16':269282,'DANUAB32':415485,'DAPARINF':1440000,'DASTDT60':103931,'DASULF35':62244,'DAVFBGDV':122685,'DAVIGT1N':242620,'DAVILT1N':262838,'DAVIOT1N':262838,'DAVIST1N':303275,'DAVTTGDV':40895,'DVASP100':244000,'DVIMUD15':87500,'DVIMUN60':170000,'DVPRDMSY':198000,'DVPRDMTB':945000,'MLBIOA60':48946,'MLDECC10':261433,'MLDECFT1':229395,'MLDECPEN':180905,'MLDECPL6':75000,'MLDESY60':132592,'MLENADV1':120110,'MLENADV3':113733,'MLENFIZZ':87500,'MLENSCG5':169000,'MLENTDV1':109109,'MLENTDV3':94539,'MLNALT10':569850,'MLNEDT10':118116,'MLNEFT10':156742,'PRGRT500':591398,'PRPASY60':194933,'PRPAT200':1483733,'PRSIS10N':169333}
 };
 
-// Dapatkan avg riil per produk di outlet tertentu (null jika tidak ada data)
-function getRealProductAvg(outletName, productCode) {
-  const od = productSales[outletName];
-  return (od && od[productCode] !== undefined) ? od[productCode] : null;
+// Dapatkan avg riil per produk di outlet tertentu
+// Mencari berdasarkan NAMA dulu, jika tidak ketemu coba berdasarkan KODE
+function getRealProductAvg(outletName, productCode, outletKode) {
+  // Coba 1: Berdasarkan nama (exact)
+  let od = productSales[outletName];
+  if (od && od[productCode] !== undefined) return od[productCode];
+  
+  // Coba 2: Berdasarkan nama (normalized/fuzzy)
+  if (!od) {
+    const normTarget = String(outletName).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    for (const key in productSales) {
+      const normKey = String(key).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (normKey === normTarget) {
+        od = productSales[key];
+        break;
+      }
+    }
+    if (od && od[productCode] !== undefined) return od[productCode];
+  }
+  
+  // Coba 3: Berdasarkan KODE outlet (jika tersedia)
+  if (outletKode && productSalesByCode) {
+    const odCode = productSalesByCode[outletKode];
+    if (odCode && odCode[productCode] !== undefined) return odCode[productCode];
+  }
+  
+  return null;
 }
+
+// Mapping tambahan: productSales berdasarkan KODE outlet
+// Akan diisi saat data dimuat dari Apps Script
+let productSalesByCode = {};
 
 // Estimasi avg per produk:
 // - Jika ada data riil -> gunakan itu
 // - Jika outlet membeli produk lain di kategori -> estimasi 30% dari produk terendah
 // - Jika tidak ada data sama sekali di kategori -> 0
-function estimateProductAvg(outletName, productCode, categoryProducts) {
-  const real = getRealProductAvg(outletName, productCode);
+function estimateProductAvg(outletName, productCode, categoryProducts, outletKode) {
+  const real = getRealProductAvg(outletName, productCode, outletKode);
   if (real !== null) return { avg: real, isReal: true, note: 'Data riil avg 3bln' };
   
   const bought = [];
@@ -1827,11 +1953,112 @@ const clusters = ['General Trade','Resellers','Retailers','RSD','Hospital','Key 
     }
   }
   
-  // Post-processing: isi kode asli dan distributor berdasarkan nama outlet
+  // Helper: normalisasi nama untuk fuzzy matching
+  function normalizeName(name) {
+    return String(name || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')  // Hapus semua karakter non-alfanumerik
+      .replace(/\s+/g, '');       // Hapus spasi
+  }
+  
+  // Cache untuk pencarian cepat
+  let _normalizedOutletMeta = null;
+  function buildNormalizedCache() {
+    if (_normalizedOutletMeta) return _normalizedOutletMeta;
+    _normalizedOutletMeta = {};
+    for (const key in outletMeta) {
+      const norm = normalizeName(key);
+      if (norm && !_normalizedOutletMeta[norm]) {
+        _normalizedOutletMeta[norm] = outletMeta[key];
+      }
+    }
+    return _normalizedOutletMeta;
+  }
+  
+  // Cari meta outlet dengan fuzzy matching
+  function findOutletMeta(outletName) {
+    if (!outletName) return null;
+    
+    // Coba exact match dulu
+    if (outletMeta[outletName]) return outletMeta[outletName];
+    
+    // Coba normalized match
+    const cache = buildNormalizedCache();
+    const norm = normalizeName(outletName);
+    if (cache[norm]) return cache[norm];
+    
+    // Coba partial match (cari yang mengandung nama ini, atau nama ini mengandungnya)
+    const nameUpper = outletName.toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim();
+    if (nameUpper.length < 5) return null;
+    
+    let bestMatch = null;
+    let bestScore = 0;
+    
+    for (const key in outletMeta) {
+      const keyUpper = key.toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim();
+      if (!keyUpper) continue;
+      
+      // Hitung kesamaan kata kunci
+      const nameWords = nameUpper.split(/\s+/).filter(w => w.length > 2);
+      const keyWords = keyUpper.split(/\s+/).filter(w => w.length > 2);
+      
+      let matches = 0;
+      for (const nw of nameWords) {
+        for (const kw of keyWords) {
+          if (nw === kw || nw.includes(kw) || kw.includes(nw)) {
+            matches++;
+            break;
+          }
+        }
+      }
+      
+      const score = matches / Math.max(nameWords.length, keyWords.length);
+      if (score > bestScore && score >= 0.6) {
+        bestScore = score;
+        bestMatch = outletMeta[key];
+      }
+    }
+    
+    return bestMatch;
+  }
+  
+  
+  // Post-processing: UTAMAKAN KODE sebagai acuan utama
+  // 1. Cari berdasarkan KODE dulu (jika kode sudah benar, nama disesuaikan)
+  // 2. Jika kode tidak ditemukan -> cari berdasarkan nama (fallback)
+  // Build mapping: kode -> meta
+  const codeToMeta = {};
+  for (const name in outletMeta) {
+    const meta = outletMeta[name];
+    if (meta && meta.code) {
+      codeToMeta[String(meta.code)] = { ...meta, namaAsli: name };
+    }
+  }
+  
   outlets.forEach(o => {
-    const meta = outletMeta[o.outlet];
+    let meta = null;
+    let matchedBy = null;
+    
+    // UTAMA: Cocokkan berdasarkan KODE
+    if (o.kode && codeToMeta[o.kode]) {
+      meta = codeToMeta[o.kode];
+      matchedBy = 'code';
+      // Update NAMA outlet mengikuti nama di Excel (karena kode adalah raja)
+      if (meta.namaAsli && meta.namaAsli !== o.outlet) {
+        o.outlet = meta.namaAsli;
+      }
+    }
+    
+    // Fallback: Cocokkan berdasarkan nama (jika kode tidak ditemukan)
+    if (!meta) {
+      meta = findOutletMeta(o.outlet);
+      matchedBy = 'name';
+      if (meta && meta.code) {
+        o.kode = String(meta.code);
+      }
+    }
+    
     if (meta) {
-      if (meta.code) o.kode = String(meta.code);
       if (meta.distributor) o.distributor = meta.distributor;
       else if (!o.distributor) o.distributor = 'APL';
     } else if (!o.distributor) {
@@ -1901,7 +2128,7 @@ function switchTab(tabId, btn) {
 function calcOutletTotalForProgram(outlet, program) {
   let total = 0;
   for (const produk of program.produk) {
-    const avg = getRealProductAvg(outlet.outlet, produk.kode);
+    const avg = getRealProductAvg(outlet.outlet, produk.kode, outlet.kode);
     if (avg !== null) total += avg;
   }
   return total;
@@ -2312,7 +2539,7 @@ function showProductModal(outletNameEncoded) {
       `;
       
       prog.produk.forEach(produk => {
-        const result = estimateProductAvg(outlet.outlet, produk.kode, prog.produk);
+        const result = estimateProductAvg(outlet.outlet, produk.kode, prog.produk, outlet.kode);
         const estAvg = result.avg;
         const isReal = result.isReal;
         const note = result.note;
