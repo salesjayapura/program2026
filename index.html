@@ -2074,20 +2074,39 @@ const clusters = ['General Trade','Resellers','Retailers','RSD','Hospital','Key 
     const notKA_Hosp_RSD = c !== 'Key Account' && c !== 'Hospital' && c !== 'RSD';
     const imEligible = c !== 'Key Account';
     
+    // Eligibilitas channel SAJA (tanpa batasan skor) - untuk Program Prioritas Pembinaan
+    o.channelFit = {};
+    o.channelFit.hs = notKA_Hosp_RSD;
+    o.channelFit.pc = notKA_Hosp_RSD;
+    o.channelFit.cc = notKA_Hosp;
+    o.channelFit.nat = notKA_Hosp;
+    o.channelFit.im = imEligible;
+    o.channelFit.gm = notKA;
+    o.channelFit.cm = notKA;
+    o.channelFit.hd = notKA;
+    o.channelFit.chc = notKA;
+    o.channelFit.st = notKA;
+    o.channelFit.wh = notKA;
+    
+    // Eligibilitas PENUH (channel sesuai + skor >= 45)
     o.eligible = {};
-    o.eligible.hs = notKA_Hosp_RSD && o.skor >= 45;
-    o.eligible.pc = notKA_Hosp_RSD && o.skor >= 45;
-    o.eligible.cc = notKA_Hosp && o.skor >= 45;
-    o.eligible.nat = notKA_Hosp && o.skor >= 45;
-    o.eligible.im = imEligible && o.skor >= 45;
-    o.eligible.gm = notKA && o.skor >= 45;
-    o.eligible.cm = notKA && o.skor >= 45;
-    o.eligible.hd = notKA && o.skor >= 45;
-    o.eligible.chc = notKA && o.skor >= 45;
-    o.eligible.st = notKA && o.skor >= 45;
-    o.eligible.wh = notKA && o.skor >= 45;
+    o.eligible.hs = o.channelFit.hs && o.skor >= 45;
+    o.eligible.pc = o.channelFit.pc && o.skor >= 45;
+    o.eligible.cc = o.channelFit.cc && o.skor >= 45;
+    o.eligible.nat = o.channelFit.nat && o.skor >= 45;
+    o.eligible.im = o.channelFit.im && o.skor >= 45;
+    o.eligible.gm = o.channelFit.gm && o.skor >= 45;
+    o.eligible.cm = o.channelFit.cm && o.skor >= 45;
+    o.eligible.hd = o.channelFit.hd && o.skor >= 45;
+    o.eligible.chc = o.channelFit.chc && o.skor >= 45;
+    o.eligible.st = o.channelFit.st && o.skor >= 45;
+    o.eligible.wh = o.channelFit.wh && o.skor >= 45;
     
     o.eligiblePrograms = programList.filter(p => o.eligible[p.id]);
+    // Program Prioritas Pembinaan: sesuai channel tapi skor < 45 (diberikan agar skor naik)
+    o.priorityPrograms = programList.filter(p => o.channelFit[p.id] && !o.eligible[p.id]);
+    // Semua program yang sesuai channel (eligible + prioritas)
+    o.allChannelPrograms = programList.filter(p => o.channelFit[p.id]);
   });
   
   return outlets;
@@ -2355,7 +2374,7 @@ function showProgramDetail(progId) {
             <tbody style="color:var(--text)">
     `;
     
-    nonEligibleWithPurchase.slice(0, 20).forEach((item, idx) => {
+    nonEligibleWithPurchase.forEach((item, idx) => {
       const alasan = item.outlet.skor < 45 ? `Skor rendah (${item.outlet.skor}/100)` : 'Channel tidak sesuai';
       html += `
         <tr style="border-bottom:1px solid var(--border)">
@@ -2427,19 +2446,19 @@ function filterOutletTable2() {
     const matchSearch = o.outlet.toLowerCase().includes(search) || o.kode.toLowerCase().includes(search);
     const matchCluster = !cluster || o.cluster === cluster;
     const matchDistributor = !distributor || o.distributor === distributor;
-    const matchProg = !progFilter || o.eligible[progFilter];
+    const matchProg = !progFilter || o.eligible[progFilter] || o.channelFit[progFilter];
     return matchSearch && matchCluster && matchDistributor && matchProg;
   });
   
   filtered.sort((a, b) => {
-    const aCount = a.eligiblePrograms.length;
-    const bCount = b.eligiblePrograms.length;
+    const aCount = a.allChannelPrograms.length;
+    const bCount = b.allChannelPrograms.length;
     if (bCount !== aCount) return bCount - aCount;
     return b.skor - a.skor;
   });
   
   renderOutletTable2(filtered);
-  document.getElementById('tableInfo2').textContent = `Menampilkan ${filtered.length} dari ${allOutlets.length} outlet`;
+  document.getElementById('tableInfo2').innerHTML = `Menampilkan ${filtered.length} dari ${allOutlets.length} outlet · <span class="prog-tag" style="font-size:10px">Eligible</span> = Skor ≥ 45 · <span class="prog-tag" style="background:var(--accent2-soft);color:var(--accent2);border:1px solid rgba(212,114,74,.3);font-size:10px">Prioritas*</span> = Program pembinaan untuk dorong kenaikan skor`;
 }
 
 function renderOutletTable2(data) {
@@ -2450,10 +2469,15 @@ function renderOutletTable2(data) {
     const trendIcon = o.trend === 'meningkat' ? '↑' : o.trend === 'menurun' ? '↓' : '→';
     const trendColor = o.trend === 'meningkat' ? 'var(--accent)' : o.trend === 'menurun' ? '#dc2626' : 'var(--muted)';
     const anyEligible = o.eligiblePrograms.length > 0;
+    const hasPriority = o.priorityPrograms.length > 0;
     
-    const progTags = o.eligiblePrograms.length > 0 
+    const eligibleTags = o.eligiblePrograms.length > 0 
       ? o.eligiblePrograms.map(p => `<span class="prog-tag">${p.kategori}</span>`).join('')
-      : '<span style="color:var(--muted);font-size:11px">Tidak ada</span>';
+      : '';
+    const priorityTags = o.priorityPrograms.length > 0
+      ? o.priorityPrograms.map(p => `<span class="prog-tag" style="background:var(--accent2-soft);color:var(--accent2);border:1px solid rgba(212,114,74,.3)">${p.kategori}*</span>`).join('')
+      : '';
+    const progTags = eligibleTags + priorityTags || '<span style="color:var(--muted);font-size:11px">Tidak ada</span>';
     
     return `
       <tr class="tbl-row clickable" style="border-bottom:1px solid var(--border)" onclick="showProductModal('${encodeURIComponent(o.outlet)}')">
@@ -2465,7 +2489,7 @@ function renderOutletTable2(data) {
         <td class="py-2.5 pr-3 text-right font-semibold text-xs" style="color:${growthColor}">${o.growth_yoy>=0?'+':''}${o.growth_yoy}%</td>
         <td class="py-2.5 pr-3 text-center" style="color:${trendColor};font-weight:bold">${trendIcon}</td>
         <td class="py-2.5 pr-3 text-center"><span class="pill ${scoreClass}"><strong>${o.skor}</strong></span></td>
-        <td class="py-2.5 pr-3 text-xs font-medium">${anyEligible?'✅ ELIGIBLE':'❌ TIDAK'}</td>
+        <td class="py-2.5 pr-3 text-xs font-medium">${anyEligible?'✅ ELIGIBLE':(hasPriority?'🎯 PRIORITAS':'❌ TIDAK')}</td>
         <td class="py-2.5 pr-3 text-right lift-positive text-xs font-bold">+${o.lift}%</td>
         <td class="py-2.5 pr-3" style="max-width:280px">${progTags}</td>
       </tr>
@@ -2503,15 +2527,39 @@ function showProductModal(outletNameEncoded) {
     </div>
   `;
   
-  if (outlet.eligiblePrograms.length === 0) {
+  // Tentukan program yang akan ditampilkan
+  // Prioritas 1: Program Eligible (skor >= 45)
+  // Prioritas 2: Program Prioritas Pembinaan (sesuai channel, skor < 45) - agar skor naik
+  let programsToShow = [];
+  let isPriorityMode = false;
+  let programBanner = '';
+  
+  if (outlet.eligiblePrograms.length > 0) {
+    programsToShow = outlet.eligiblePrograms;
+    programBanner = '';
+  } else if (outlet.priorityPrograms.length > 0) {
+    programsToShow = outlet.priorityPrograms;
+    isPriorityMode = true;
+    programBanner = `
+      <div class="rounded-xl p-4 mb-5" style="background:rgba(212,114,74,.08);border:1px solid rgba(212,114,74,.3)">
+        <p class="text-sm font-semibold mb-1" style="color:#9a3412">🎯 PROGRAM PRIORITAS PEMBINAAN</p>
+        <p class="text-xs" style="color:var(--muted)">
+          Skor outlet: <strong>${outlet.skor}/100</strong> (di bawah threshold 45). Channel: <strong>${outlet.cluster}</strong><br>
+          <strong>Program tetap diberikan untuk mendorong kenaikan angka penjualan agar indeks outlet membaik.</strong>
+        </p>
+      </div>
+    `;
+  }
+  
+  if (programsToShow.length === 0) {
     html += `
       <div class="rounded-xl p-6 text-center" style="background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.15)">
-        <p class="text-lg font-semibold mb-2" style="color:#991b1b">❌ TIDAK ADA PROGRAM YANG ELIGIBLE</p>
-        <p class="text-sm" style="color:var(--muted)">Skor outlet: ${outlet.skor}/100 (di bawah threshold 45). Channel sebenarnya: ${outlet.cluster}</p>
+        <p class="text-lg font-semibold mb-2" style="color:#991b1b">❌ TIDAK ADA PROGRAM YANG SESUAI CHANNEL</p>
+        <p class="text-sm" style="color:var(--muted)">Channel outlet: ${outlet.cluster} tidak sesuai dengan program manapun.</p>
         <div class="mt-4 p-3 rounded-lg text-left" style="background:var(--card);border:1px solid var(--border)">
           <p class="text-xs font-semibold mb-2" style="color:var(--accent2)">Saran:</p>
           <ul class="text-xs space-y-1" style="color:var(--muted)">
-            <li>• Investigasi penyebab skor rendah (volume kecil atau tren menurun?)</li>
+            <li>• Fokuskan pada program umum yang tidak dibatasi channel</li>
             <li>• Berikan program pembinaan sebelum program promosi</li>
             <li>• Evaluasi kembali setelah 3 bulan jika ada perbaikan</li>
           </ul>
@@ -2519,10 +2567,11 @@ function showProductModal(outletNameEncoded) {
       </div>
     `;
   } else {
+    html += programBanner;
     let grandTotalOrder = 0;
     let grandTotalProduk = 0;
     
-    outlet.eligiblePrograms.forEach(prog => {
+    programsToShow.forEach(prog => {
       const jumlahProduk = prog.produk.length;
       grandTotalProduk += jumlahProduk;
       
@@ -2593,8 +2642,8 @@ function showProductModal(outletNameEncoded) {
       <div class="mt-6 p-4 rounded-xl" style="background:var(--accent-soft);border:1px solid rgba(13,150,105,.25)">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <div class="text-xs" style="color:var(--muted)">Total Program Eligible</div>
-            <div class="text-xl font-bold" style="color:var(--accent)">${outlet.eligiblePrograms.length} kategori · ${grandTotalProduk} produk</div>
+            <div class="text-xs" style="color:var(--muted)">Total Program ${isPriorityMode ? 'Prioritas' : 'Eligible'}</div>
+            <div class="text-xl font-bold" style="color:${isPriorityMode ? 'var(--accent2)' : 'var(--accent)'}">${programsToShow.length} kategori · ${grandTotalProduk} produk</div>
           </div>
           <div>
             <div class="text-xs" style="color:var(--muted)">Total Saran Order / bulan</div>
